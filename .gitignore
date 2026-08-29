@@ -417,3 +417,6 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# CMake out-of-source build
+/build/

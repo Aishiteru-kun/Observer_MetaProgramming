@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            compiler: msvc
+          - os: ubuntu-24.04
+            compiler: gcc
+          - os: ubuntu-24.04
+            compiler: clang
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select GCC
+        if: matrix.compiler == 'gcc'
+        run: |
+          echo "CC=gcc" >> "$GITHUB_ENV"
+          echo "CXX=g++" >> "$GITHUB_ENV"
+
+      - name: Select Clang
+        if: matrix.compiler == 'clang'
+        run: |
+          echo "CC=clang" >> "$GITHUB_ENV"
+          echo "CXX=clang++" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: cmake -S . -B build -DOBSERVER_META_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build --config Debug --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C Debug --output-on-failure

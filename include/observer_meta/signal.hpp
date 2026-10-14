@@ -14,6 +14,11 @@
 #include <utility>
 #include <vector>
 
+namespace se::input::detail
+{
+struct InputOwnerDrainAccess;
+}
+
 namespace observer_meta
 {
 namespace collector
@@ -84,6 +89,8 @@ using CollectingSignal = BasicSignal<Signature, Collector>;
 template <typename... Args>
 class BasicSignal<void(Args...), detail::VoidSignalPolicy>
 {
+    friend struct se::input::detail::InputOwnerDrainAccess;
+
     static_assert(detail::multicast_arguments_are_reusable<Args...>,
                   "Multicast value arguments must be copyable and rvalue-reference arguments are unsupported");
 
@@ -97,9 +104,16 @@ class BasicSignal<void(Args...), detail::VoidSignalPolicy>
 
     class State final : public detail::ConnectionState
     {
+        friend struct se::input::detail::InputOwnerDrainAccess;
+        friend class BasicSignal<void(Args...), detail::VoidSignalPolicy>;
+
     public:
         [[nodiscard]] std::uint64_t add(Slot slot)
         {
+            if (terminal_retirement)
+            {
+                return 0;
+            }
             if (slot.alive && !slot.alive())
             {
                 return 0;
@@ -131,6 +145,10 @@ class BasicSignal<void(Args...), detail::VoidSignalPolicy>
 
         [[nodiscard]] bool connected(const std::uint64_t id) const noexcept override
         {
+            if (terminal_retirement)
+            {
+                return false;
+            }
             const auto iterator = std::find_if(slots.begin(), slots.end(), [id](const Slot& slot)
             {
                 return slot.id == id;
@@ -140,6 +158,14 @@ class BasicSignal<void(Args...), detail::VoidSignalPolicy>
 
         void clear() noexcept
         {
+            if (terminal_retirement)
+            {
+                for (auto& slot : slots)
+                {
+                    slot.active = false;
+                }
+                return;
+            }
             if (dispatch_depth == 0)
             {
                 slots.clear();
@@ -196,7 +222,7 @@ class BasicSignal<void(Args...), detail::VoidSignalPolicy>
 
         void compact_if_idle() noexcept
         {
-            if (dispatch_depth != 0)
+            if (terminal_retirement || dispatch_depth != 0)
             {
                 return;
             }
@@ -209,6 +235,7 @@ class BasicSignal<void(Args...), detail::VoidSignalPolicy>
 
         std::uint64_t next_id = 1;
         std::size_t dispatch_depth = 0;
+        bool terminal_retirement = false;
     };
 
     class DispatchScope final
@@ -333,6 +360,10 @@ public:
         }
 
         const auto state = state_;
+        if (state->terminal_retirement)
+        {
+            return;
+        }
         DispatchScope dispatch{state};
         const auto dispatch_limit = state->slots.size();
 
